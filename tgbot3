@@ -6,7 +6,6 @@ from telegram import Bot
 import httplib2
 
 import os
-my_secret = os.environ['API_KEY']
 
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
@@ -28,7 +27,7 @@ def upload_to_drive(filename, filepath):
 '''
 
 
-bot = Bot(my_secret)
+bot = Bot(BOT_TOKEN)
 Ucndt = {}
 Urow = {}
 
@@ -41,7 +40,7 @@ credentials = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE,
 
 client = gspread.authorize(credentials)
 
-sheet = client.open_by_key('13Z8xKJh7anV_3W0vYg2DaI5O2NGoq14_iNE1Vy_osbs')
+sheet = client.open_by_key(SHEET_KEY)
 
 worksheet = sheet.get_worksheet(0)  
 
@@ -92,12 +91,6 @@ Update -, cotext -
 async def photoexp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     values_list = worksheet.col_values(1)
     x = len(values_list)+1
-
-    '''
-    file_name = f"Photos/photo{x}.png"
-    file = client.import(file_name, folder_id='1xEzUXRM9IgLt_B8UZlOcb05K-eAmveNP')
-    img_url = 'https://drive.google.com/uc?id=' + file['id']
-    '''
     
     file_id = update.message.photo[-1].file_id
     new_file = await bot.get_file(file_id)
