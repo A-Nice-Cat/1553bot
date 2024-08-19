@@ -1,0 +1,180 @@
+import gspread
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext.filters import CHAT, PHOTO
+from telegram import Bot
+import httplib2
+
+import os
+my_secret = os.environ['API_KEY']
+
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+
+
+'''
+def upload_to_drive(filename, filepath):
+    # Authentication process
+    gauth = GoogleAuth()
+    gauth.LocalWebserverAuth()  # This creates a local webserver to handle the authentication process.
+
+    drive = GoogleDrive(gauth)
+
+    # File upload
+    file_drive = drive.CreateFile({'title': filename})
+    file_drive.SetContentFile(filepath)
+    file_drive.Upload()
+    print(f"File {filename} has been uploaded.")
+'''
+
+
+bot = Bot(my_secret)
+Ucndt = {}
+Urow = {}
+
+
+from oauth2client.service_account import ServiceAccountCredentials  
+
+CREDENTIALS_FILE = 'tgbot-423116-d0659048c43a.json' 
+
+credentials = ServiceAccountCredentials.from_json_keyfile_name(CREDENTIALS_FILE, ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive'])
+
+client = gspread.authorize(credentials)
+
+sheet = client.open_by_key('13Z8xKJh7anV_3W0vYg2DaI5O2NGoq14_iNE1Vy_osbs')
+
+worksheet = sheet.get_worksheet(0)  
+
+
+'''
+FindNulls
+Находит пустые строки в стобце "Text"
+UID - Идентификатор пользователя чьи неподписанные фотографии необходимо найти
+Возвращает список пустых строк
+'''
+def FindNulls(UID):
+  cells = worksheet.findall(UID)
+  cells_null = []
+  
+  for i in range(len(cells)):
+    val = worksheet.cell(cells[i].row, 2).value
+    if val == None:
+      cells_null.append(cells[i].row)
+  
+  return(cells_null)
+
+'''
+hello
+Здоровается с пользователем, используя его имя и идентификатор
+update - , context - 
+'''
+async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(f'Приветик, {update.effective_user.first_name} ({update.effective_user.id})')
+
+'''
+Принимает фото, запускает процесс загрузки фото в таблицы
+update - , context - 
+'''
+async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    Ucndt[update.effective_user.id] = "photo"
+    await photoexp(update, context)
+    if update.message.caption == None:
+        await update.message.reply_text("Хорошо, а теперь подпиши его.")
+    else: 
+        await phototxt(update,context,update.message.caption)
+    print(Ucndt)
+    
+
+'''
+Загружает фото в таблицу
+Update -, cotext -
+'''
+async def photoexp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    values_list = worksheet.col_values(1)
+    x = len(values_list)+1
+
+    '''
+    file_name = f"Photos/photo{x}.png"
+    file = client.import(file_name, folder_id='1xEzUXRM9IgLt_B8UZlOcb05K-eAmveNP')
+    img_url = 'https://drive.google.com/uc?id=' + file['id']
+    '''
+    
+    file_id = update.message.photo[-1].file_id
+    new_file = await bot.get_file(file_id)
+    await new_file.download_to_drive(f"Photos/photo{x}.png")
+    print(new_file.file_path)
+    Urow[update.effective_user.id] = x
+    #upload_to_drive(f"Photos/photo{x}.png", f"Photos/photo{x}.png")
+    worksheet.update_cell(x, 1, update.effective_user.id)
+    worksheet.update_cell(x, 3, f'=image("{new_file.file_path}")')
+    worksheet.update_cell(x, 4, f"photo{x}.png")
+
+'''
+Подписывает фото и загружает подпись в стобец "Text"
+TXT - подпись фото, Update -, context - 
+'''
+async def phototxt(update: Update, context: ContextTypes.DEFAULT_TYPE, TXT) -> None:
+    
+    worksheet.update_cell(Urow[update.effective_user.id], 2, TXT)
+    await update.message.reply_text("Принял!")
+    Ucndt[update.effective_user.id] = "start"
+    print(f'Фото подписано! Подпись: {TXT}')
+
+
+
+'''
+Обрабатывает полученный текст
+Update -, context -
+'''
+async def get_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    print(f'Текст: {update.message.text}')
+    if Ucndt[update.effective_user.id] == "start": 
+        await update.message.reply_text("Отправь мне фото.")
+        return
+    if Ucndt[update.effective_user.id] != "photo": return
+    await phototxt(update, context, update.message.text)
+    UCap = update.message.text
+    print(UCap)
+    print(Ucndt)
+
+'''
+Отправляет приветственное сообщение
+Update -, context -
+'''
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    Ucndt[update.effective_user.id] = "start"
+    await update.message.reply_text("Привет! Отправь мне фото. \nОтправь /desc, чтобы подписать неподписанные ранее фото.")
+    print(Ucndt)
+
+'''
+Обрабатывает команду /desc: ищет неподписанные фото и отправляет их пользователю
+Update -, context -
+'''
+async def desc(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Идёт поиск фото...")
+    a = FindNulls(str(update.effective_user.id))
+    print(a)
+    if len(a) == 0:
+        await update.message.reply_text("Все ваши фото подписаны!")
+    else:
+        await bot.send_photo(chat_id=update.effective_user.id,photo=open(f"Photos/photo{a[-1]}.png", "rb"))
+        await bot.send_message(chat_id=update.effective_user.id,text="Подпиши это фото.")
+        Ucndt[update.effective_user.id] = "photo"
+        Urow[update.effective_user.id] = a[-1]
+    
+    
+
+app = ApplicationBuilder().token(my_secret).build()
+
+app.add_handler(CommandHandler("hello", hello))
+
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, get_text))
+
+app.add_handler(MessageHandler(filters.PHOTO, photo))
+
+app.add_handler(CommandHandler("start", start))
+
+app.add_handler(CommandHandler("desc", desc))
+
+
+app.run_polling()
